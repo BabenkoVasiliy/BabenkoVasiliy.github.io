@@ -7,7 +7,7 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
-const BOT_URL = "https://xobot-production.up.railway.app/move";
+const BOT_URL = "https://xobot-n0xe.onrender.com/move";
 
 let currentPlayer = 'X';
 let gameState = ['', '', '', '', '', '', '', '', ''];
