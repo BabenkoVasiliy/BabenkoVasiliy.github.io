@@ -7,12 +7,14 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
+const BOT_URL = "https://xobot-production.up.railway.app/move";
+
 let currentPlayer = 'X';
 let gameState = ['', '', '', '', '', '', '', '', ''];
 let gameActive = true;
 let xMoves = [];
 let oMoves = [];
-let isBotMode = false;
+let chatId = null;
 
 const winningConditions = [
     [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -20,15 +22,19 @@ const winningConditions = [
     [0, 4, 8], [2, 4, 6]
 ];
 
+if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+    chatId = tg.initDataUnsafe.user.id;
+}
+
 function handleCellClick(e) {
-    if (currentPlayer === 'O' && isBotMode) return;
+    if (currentPlayer === 'O') return;
 
     const cell = e.target;
     const index = parseInt(cell.getAttribute('data-index'));
 
     if (gameState[index] !== '' || !gameActive) return;
 
-    const moves = currentPlayer === 'X' ? xMoves : oMoves;
+    const moves = xMoves;
     const isRemoveMove = moves.length >= 3;
 
     if (isRemoveMove) {
@@ -37,7 +43,7 @@ function handleCellClick(e) {
         cells[oldIndex].classList.remove('x', 'o', 'winner');
         cells[oldIndex].textContent = '';
         gameState[oldIndex] = '';
-        moves.shift();
+        xMoves.shift();
 
         makeMove(index, cell);
     } else {
@@ -46,8 +52,10 @@ function handleCellClick(e) {
 
     tg.HapticFeedback.impactOccurred('light');
 
-    if (isBotMode && gameActive && currentPlayer === 'O') {
-        setTimeout(botMove, 500);
+    if (gameActive && currentPlayer === 'O') {
+        setTimeout(async () => {
+            await sendMoveToBot();
+        }, 500);
     }
 }
 
@@ -82,89 +90,37 @@ function makeMove(index, cell) {
     status.textContent = `Ход: ${currentPlayer}`;
 }
 
-function botMove() {
-    if (!gameActive || currentPlayer !== 'O') return;
+async function sendMoveToBot() {
+    try {
+        const response = await fetch(BOT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chatId: chatId,
+                board: gameState,
+                xMoves: xMoves,
+                oMoves: oMoves,
+                lastMove: xMoves.length > 0 ? xMoves[xMoves.length - 1] : -1
+            })
+        });
 
-    const emptyCells = gameState.map((v, i) => v === '' ? i : -1).filter(i => i !== -1);
-    if (emptyCells.length === 0) return;
+        const data = await response.json();
 
-    let bestMove = -1;
-    let bestScore = -Infinity;
-
-    for (const index of emptyCells) {
-        const score = minimax(index, 0, true);
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove = index;
-        }
-    }
-
-    if (bestMove !== -1) {
-        const cell = cells[bestMove];
-        const moves = oMoves;
-        const isRemoveMove = moves.length >= 3;
-
-        if (isRemoveMove) {
-            const oldIndex = moves[0];
-            cells[oldIndex].classList.remove('flicker');
-            cells[oldIndex].classList.remove('x', 'o', 'winner');
+        if (data.remove !== -1) {
+            const oldIndex = data.remove;
+            cells[oldIndex].classList.remove('flicker', 'x', 'o', 'winner');
             cells[oldIndex].textContent = '';
             gameState[oldIndex] = '';
-            moves.shift();
+            oMoves.shift();
         }
 
-        makeMove(bestMove, cell);
-    }
-}
-
-function minimax(lastMove, depth, isMaximizing) {
-    const winner = checkWinner();
-    if (winner === 'O') return 100 - depth;
-    if (winner === 'X') return depth - 100;
-    if (checkDraw()) return 0;
-
-    const moves = isMaximizing ? oMoves : xMoves;
-    const isRemoveMove = moves.length >= 3;
-
-    if (isRemoveMove) {
-        const testMoves = [...moves];
-        testMoves.shift();
-        testMoves.push(lastMove);
-    }
-
-    if (isMaximizing) {
-        let maxScore = -Infinity;
-        for (let i = 0; i < 9; i++) {
-            if (gameState[i] === '') {
-                gameState[i] = 'O';
-                const score = minimax(i, depth + 1, false);
-                gameState[i] = '';
-                maxScore = Math.max(maxScore, score);
-            }
+        if (data.index !== -1) {
+            const cell = cells[data.index];
+            makeMove(data.index, cell);
         }
-        return maxScore;
-    } else {
-        let minScore = Infinity;
-        for (let i = 0; i < 9; i++) {
-            if (gameState[i] === '') {
-                gameState[i] = 'X';
-                const score = minimax(i, depth + 1, true);
-                gameState[i] = '';
-                minScore = Math.min(minScore, score);
-            }
-        }
-        return minScore;
+    } catch (err) {
+        console.error('Bot move error:', err);
     }
-}
-
-function checkWinner() {
-    for (const condition of winningConditions) {
-        const [a, b, c] = condition;
-        if (gameState[a] && gameState[a] === gameState[b] && gameState[a] === gameState[c]) {
-            return gameState[a];
-        }
-    }
-    return null;
 }
 
 function checkWin() {
@@ -193,8 +149,7 @@ function restartGame() {
     gameActive = true;
     xMoves = [];
     oMoves = [];
-    isBotMode = true;
-    status.textContent = `Ход: ${currentPlayer}`;
+    status.textContent = "Игра с ботом! Ваш ход: X";
     cells.forEach(cell => {
         cell.textContent = '';
         cell.classList.remove('x', 'o', 'winner', 'flicker');
@@ -205,5 +160,4 @@ function restartGame() {
 cells.forEach(cell => cell.addEventListener('click', handleCellClick));
 restartBtn.addEventListener('click', restartGame);
 
-isBotMode = true;
 status.textContent = "Игра с ботом! Ваш ход: X";
